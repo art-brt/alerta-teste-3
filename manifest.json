@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
-    "name": "TESTE L.I.A – Lembrete de Interações Automatizado",
-    "version": "1.0",
+    "name": "L.I.A – Lembrete de Interações Automatizado",
+    "version": "5.0",
     "description": "Monitora o tempo que o cliente enviou a mensagem e alerta quando estiver próximo do limite de tempo da resposta",
     "permissions": [
         "activeTab",
