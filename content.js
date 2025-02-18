@@ -159,7 +159,6 @@ const CONFIG = {
     modal.innerHTML = `
       <button class="close-button" aria-label="Fechar modal">✖</button>
       <h2>${config.icon} ${config.message} ${config.icon}</h2>
-      <p>Conversas com ${config.threshold}:</p>
       <ul class="conversation-list">
         ${conversationsData
           .filter((conv) => conv.name && conv.name.trim())
@@ -168,10 +167,10 @@ const CONFIG = {
       </ul>
     `;
   
-    // Atribui o evento de fechamento ao botão
+    // Evento para fechar o modal
     modal.querySelector('.close-button').addEventListener('click', closeModal);
   
-    // Insere o modal e o backdrop na página
+    // Adiciona o modal e o backdrop na página
     document.body.appendChild(backdrop);
     document.body.appendChild(modal);
   };
