@@ -1,137 +1,199 @@
-console.log('Monitor de Tempo - Extensão iniciada');
+// Constantes
+const CONFIG = {
+  NOTIFICATION_COOLDOWN: 60000,
+  FLASH_DURATION: 5000,
+  FLASH_INTERVAL: 1000,
+  URGENCY_LEVELS: {
+    yellow: {
+      threshold: '10 minutos',
+      class: 'yellow',
+      icon: '⚠️',
+      message: 'Atenção! Tempo chegando ao limite'
+    },
+    orange: {
+      threshold: '12 minutos',
+      class: 'orange',
+      icon: '⚠️',
+      message: 'Alerta! Tempo próximo do limite'
+    },
+    red: {
+        threshold: '15 minutos',
+        class: 'red',
+        icon: '🚨',
+        message: 'URGENTE! Tempo limite atingido'
+    }
+  },
+  SELECTORS: {
+    timeSpans: '#page-content > div > div.sc-WViWL.sc-ewbAlf.dpFbqB.bDOQYU > div.sc-gmoidK.jRDomp > div > div > div.sc-DNJco.dxDXQC > div.sc-fGPuXZ.llLkZm > div.sc-fGPuXZ.cmpOFQ > span',
+    conversationName: (index) => `#page-content > div > div.sc-WViWL.sc-ewbAlf.dpFbqB.bDOQYU > div.sc-gmoidK.jRDomp > div > div:nth-child(${index}) > div.sc-DNJco.dxDXQC > div.sc-fGPuXZ.juENAy > div.c-PJLV.c-PJLV-icWDQBH-css > span`
+  }
+};
 
-// Variáveis globais
-let originalTitle = document.title;
-let lastNotificationTime = {};  // Objeto para armazenar o último tempo de notificação para cada nível
-const NOTIFICATION_COOLDOWN = 60000; // 60 segundos de cooldown
-const CRITICAL_TIME = 20; // 20 minutos
-const CRITICAL_ALERT_INTERVAL = 60000; // 1 minuto para alertas críticos
-let criticalAlertTimer = null;
+// Estado global
+const state = {
+  originalTitle: document.title,
+  lastNotificationTime: new Map(),
+  flashInterval: null
+};
 
-// Função para fazer refresh na página
-function refreshPage() {
-    console.log('Realizando refresh da página');
-    window.location.reload();
-}
-
-// Função para refresh periódico
-function startAutoRefresh(interval = 300000) { // 5 minutos por padrão
-    setInterval(refreshPage, interval);
-    console.log(`Auto refresh configurado para cada ${interval/1000} segundos`);
-}
-
-// Função para refresh inteligente
-function smartRefresh() {
-    // Salva o estado atual antes do refresh
-    const currentState = {
-        ignoredConversations: localStorage.getItem('ignoredConversations'),
-        lastNotifications: JSON.stringify(lastNotificationTime),
-        timestamp: Date.now()
+// Utilitários
+const debounce = (func, wait) => {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
     };
-    localStorage.setItem('preRefreshState', JSON.stringify(currentState));
-    
-    // Executa o refresh
-    refreshPage();
-}
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+};
 
-// Função para verificar se deve fazer refresh após certas ações
-function checkForRefresh() {
-    const currentTime = Date.now();
-    const lastRefreshTime = parseInt(localStorage.getItem('lastRefreshTime')) || 0;
-    const REFRESH_INTERVAL = 300000; // 5 minutos
-    
-    if (currentTime - lastRefreshTime > REFRESH_INTERVAL) {
-        localStorage.setItem('lastRefreshTime', currentTime.toString());
-        smartRefresh();
-    }
-}
+const safeQuerySelector = (selector) => {
+  try {
+    return document.querySelector(selector);
+  } catch (error) {
+    console.error(`Erro ao selecionar elemento: ${selector}`, error);
+    return null;
+  }
+};
 
-// Função para verificar o estado da janela
-function checkWindowState() {
-    if (document.hidden) {
-        console.log('Janela está minimizada ou em segundo plano');
-        return false;
-    }
-    return true;
-}
+// Funções principais
+const checkWindowState = () => !document.hidden;
 
-// Função para focar na janela e aba correta
-function focusWindow() {
-    console.log('Tentando focar e maximizar a janela');
-    
+const focusWindow = () => {
+  window.focus();
+  
+  if (chrome?.runtime?.sendMessage) {
     chrome.runtime.sendMessage({ 
-        action: 'focusTab', 
-        tabId: window.tabId 
+      action: 'focusTab', 
+      tabId: window.tabId 
+    }).catch(console.error);
+  }
+
+  if ('Notification' in window && Notification.permission === 'granted') {
+    new Notification('Alerta de Tempo!', {
+      body: 'Existem conversas precisando de atenção!',
+      requireInteraction: true
     });
-    
-    window.focus();
-    
-    if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('Alerta de Tempo!', {
-            body: 'Existem conversas precisando de atenção!',
-            requireInteraction: true
-        });
+  }
+
+  if (state.flashInterval) clearInterval(state.flashInterval);
+  
+  state.flashInterval = setInterval(() => {
+    document.title = document.title === state.originalTitle ? 
+      '🚨 ALERTA! 🚨' : state.originalTitle;
+  }, CONFIG.FLASH_INTERVAL);
+
+  setTimeout(() => {
+    if (state.flashInterval) {
+      clearInterval(state.flashInterval);
+      document.title = state.originalTitle;
     }
+  }, CONFIG.FLASH_DURATION);
+};
 
-    if (window.flashInterval) {
-        clearInterval(window.flashInterval);
-    }
-    
-    window.flashInterval = setInterval(() => {
-        document.title = document.title === originalTitle ? '🚨 ALERTA! 🚨' : originalTitle;
-    }, 1000);
+const getConversationName = (index) => {
+  const element = safeQuerySelector(CONFIG.SELECTORS.conversationName(index));
+  return element?.getAttribute('title') || 'Conversa';
+};
 
-    setTimeout(() => {
-        if (window.flashInterval) {
-            clearInterval(window.flashInterval);
-            document.title = originalTitle;
-        }
-    }, 5000);
-}
+const closeModal = () => {
+  document.querySelector('.modal-backdrop')?.remove();
+  document.querySelector('.alert-modal')?.remove();
+  document.title = state.originalTitle;
+  
+  if (state.flashInterval) {
+    clearInterval(state.flashInterval);
+  }
+};
 
-// Função para verificar se a conversa está sendo atendida
-function isConversationAttended(index) {
-    const attendedIndicator = document.querySelector(`#page-content > div > div.sc-WViWL.sc-ewbAlf.dpFbqB.bDOQYU > div.sc-gmoidK.jRDomp > div > div:nth-child(${index}) > div.sc-DNJco.dxDXQC > div.sc-fGPuXZ.juENAy > div.sc-fGPuXZ.cmpOFQ > span[title="Em atendimento"]`);
-    return !!attendedIndicator;
-}
+const showAlertModal = (conversationsData, urgencyLevel) => {
+  if (document.querySelector('.alert-modal')) return;
 
-// Função para extrair minutos do texto
-function extractMinutes(timeText) {
-    const match = timeText.match(/(\d+)/);
-    return match ? parseInt(match[0]) : 0;
-}
+  const currentTime = Date.now();
+  const lastTime = state.lastNotificationTime.get(urgencyLevel) || 0;
+  
+  if (currentTime - lastTime < CONFIG.NOTIFICATION_COOLDOWN) return;
+  
+  state.lastNotificationTime.set(urgencyLevel, currentTime);
 
-// Função para verificar conversas críticas
-function checkCriticalConversations() {
-    const elements = document.querySelectorAll("#page-content > div > div.sc-WViWL.sc-ewbAlf.dpFbqB.bDOQYU > div.sc-gmoidK.jRDomp > div > div > div.sc-DNJco.dxDXQC > div.sc-fGPuXZ.llLkZm > div.sc-fGPuXZ.cmpOFQ > span");
-    let hasCriticalConversations = false;
+  if (!checkWindowState()) focusWindow();
 
-    elements.forEach((element) => {
-        const timeText = element.textContent.trim();
-        const minutes = extractMinutes(timeText);
-        
-        if (minutes >= CRITICAL_TIME) {
-            hasCriticalConversations = true;
-        }
+  const config = CONFIG.URGENCY_LEVELS[urgencyLevel];
+  
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.onclick = closeModal;
+
+  const modal = document.createElement('div');
+  modal.className = `alert-modal ${config.class}`;
+  
+  modal.innerHTML = `
+    <button class="close-button" aria-label="Fechar modal">✖</button>
+    <h2>${config.icon} ${config.message} ${config.icon}</h2>
+    <p>Conversas com ${config.threshold}:</p>
+    <ul>
+      ${conversationsData.map(conv => `<li>• ${conv.name}</li>`).join('')}
+    </ul>
+  `;
+
+  modal.querySelector('.close-button').onclick = closeModal;
+
+  document.body.appendChild(backdrop);
+  document.body.appendChild(modal);
+};
+
+const checkTimeSpans = debounce(() => {
+  const elements = document.querySelectorAll(CONFIG.SELECTORS.timeSpans);
+  const alerts = new Map([
+    ['yellow', []],
+    ['orange', []],
+    ['red', []]
+  ]);
+
+  elements.forEach((element, index) => {
+    const timeText = element.textContent.trim();
+    const convData = {
+      name: getConversationName(index + 1),
+      index: index + 1
+    };
+
+    Object.entries(CONFIG.URGENCY_LEVELS).forEach(([level, config]) => {
+      if (timeText === config.threshold) {
+        alerts.get(level).push(convData);
+      }
     });
+  });
 
-    return hasCriticalConversations;
-}
+  // Mostrar o alerta mais urgente
+  if (alerts.get('red').length) showAlertModal(alerts.get('red'), 'red');
+  else if (alerts.get('orange').length) showAlertModal(alerts.get('orange'), 'orange');
+  else if (alerts.get('yellow').length) showAlertModal(alerts.get('yellow'), 'yellow');
+}, 500);
 
-// Função para iniciar alertas críticos
-function startCriticalAlerts() {
-    if (criticalAlertTimer) {
-        clearInterval(criticalAlertTimer);
-    }
+// Inicialização
+const init = () => {
+  const observer = new MutationObserver(checkTimeSpans);
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
 
-    criticalAlertTimer = setInterval(() => {
-        if (checkCriticalConversations()) {
-            // Força o bypass do cooldown para alertas críticos
-            lastNotificationTime = {};
-            checkTimeSpans();
-        } else {
-            clearInterval(criticalAlertTimer);
-            criticalAlertTimer = null;
-        }
-    }, CRITICAL_ALERT_INTERVAL);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) checkTimeSpans();
+  });
+
+  if ('Notification' in window) {
+    Notification.requestPermission().catch(console.error);
+  }
+
+  checkTimeSpans();
+};
+// Iniciar quando o DOM estiver pronto
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
 }
